@@ -4,7 +4,9 @@
 const CONFIG = {
   chainId: 56,
   chainName: "BNB Smart Chain",
-  rpcUrl: "https://bsc-dataseed1.bnbchain.org",
+  rpcUrl: "https://rpc-bsc.48.club",
+  // Fallback if the primary RPC throttles log queries.
+  rpcFallbackUrl: "https://bsc-dataseed1.bnbchain.org",
   // AgentWall contract address on BNB Chain mainnet (deployed 2026-11-19).
   agentWallAddress: "0x5Bf3a9a8421CdcFBc074978bc316F0eeF5b20d3F",
   // Block number of the deployment transaction (first block

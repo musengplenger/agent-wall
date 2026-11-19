@@ -18,8 +18,45 @@
 
   const DEPLOYED = CONFIG.agentWallAddress !== "0x0000000000000000000000000000000000000000";
   const readProvider = new ethers.JsonRpcProvider(CONFIG.rpcUrl);
+  const fallbackProvider = CONFIG.rpcFallbackUrl ? new ethers.JsonRpcProvider(CONFIG.rpcFallbackUrl) : null;
   const wallRead = DEPLOYED ? new ethers.Contract(CONFIG.agentWallAddress, WALL_ABI, readProvider) : null;
   const agentIdRead = new ethers.Contract(CONFIG.agentIdAddress, AGENT_ID_ABI, readProvider);
+
+  // Public RPCs cap eth_getLogs ranges (48.club: 5000 blocks) and some
+  // throttle it entirely, so query in small chunks with retries and a
+  // fallback RPC.
+  async function queryChunk(provider, from, to) {
+    const wall = new ethers.Contract(CONFIG.agentWallAddress, WALL_ABI, provider);
+    return wall.queryFilter(wall.filters.CheckedIn, from, to);
+  }
+  async function queryCheckedIn() {
+    const latest = await readProvider.getBlockNumber();
+    const events = [];
+    const CHUNK = 1000;
+    for (let from = CONFIG.deploymentBlock; from <= latest; from += CHUNK) {
+      const to = Math.min(from + CHUNK - 1, latest);
+      let chunk = null;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3 && !chunk; attempt++) {
+        try {
+          chunk = await queryChunk(readProvider, from, to);
+        } catch (e) {
+          lastErr = e;
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+      if (!chunk && fallbackProvider) {
+        try {
+          chunk = await queryChunk(fallbackProvider, from, to);
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (!chunk) throw lastErr;
+      events.push(...chunk);
+    }
+    return events;
+  }
 
   let signer = null;
   let wallWrite = null;
@@ -40,7 +77,7 @@
       return;
     }
     try {
-      const events = await wallRead.queryFilter(wallRead.filters.CheckedIn, CONFIG.deploymentBlock, "latest");
+      const events = await queryCheckedIn();
       const total = await wallRead.totalAgents();
       boardEl.innerHTML = `<p><span class="pill">👥 ${total} agents</span><span class="pill">🧱 ${events.length} check-ins</span></p>`;
       if (events.length === 0) {
